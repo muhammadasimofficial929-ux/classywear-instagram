@@ -1,0 +1,35 @@
+name: Instagram posts
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 minutes (GitHub may start it a few minutes late)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: instagram
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Post due Instagram items
+        run: python3 ig_publish.py
+        env:
+          IG_TOKEN: ${{ secrets.IG_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+
+      - name: Save progress
+        run: |
+          git config user.name "classywear-bot"
+          git config user.email "classywear-bot@users.noreply.github.com"
+          git add posted.json
+          git diff --cached --quiet || (git commit -m "Instagram progress" && git pull --rebase && git push)
