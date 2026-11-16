@@ -46,17 +46,28 @@ def call(method, path, params):
 
 
 def publish(item):
-    image_url = f"{RAW}/images/{urllib.parse.quote(item['image'])}"
-    box = call("POST", f"{IG}/media", {"image_url": image_url, "caption": item["caption"]})
+    reel = item.get("type") == "reel"
+    if reel:  # a promo video -> Instagram Reel (also shown in the feed)
+        params = {"media_type": "REELS", "share_to_feed": "true", "caption": item["caption"],
+                  "video_url": f"{RAW}/videos/{urllib.parse.quote(item['video'])}"}
+    else:
+        params = {"image_url": f"{RAW}/images/{urllib.parse.quote(item['image'])}", "caption": item["caption"]}
+    box = call("POST", f"{IG}/media", params)
     cid = box["id"]
-    for _ in range(30):
+    for _ in range(75 if reel else 30):   # videos take Instagram a few minutes to process
         status = call("GET", cid, {"fields": "status_code"}).get("status_code")
         if status == "FINISHED":
             break
         if status == "ERROR":
-            raise RuntimeError("Instagram could not process the picture")
+            raise RuntimeError("Instagram could not process the " + ("video" if reel else "picture"))
         time.sleep(4)
-    return call("POST", f"{IG}/media_publish", {"creation_id": cid}).get("id", "")
+    media = call("POST", f"{IG}/media_publish", {"creation_id": cid}).get("id", "")
+    if reel:  # posted: remove the video from the repo so it does not keep using space
+        try:
+            Path("videos", item["video"]).unlink()
+        except OSError:
+            pass
+    return media
 
 
 now = time.time()
@@ -67,11 +78,11 @@ for item in due[:MAX_PER_RUN]:
     try:
         media = publish(item)
         posted[item["id"]] = {"status": "published", "media_id": media, "at": int(time.time())}
-        print(f"posted {item['image']}")
+        print(f"posted {item.get('image') or item.get('video')}")
     except Exception as e:  # keep going with the next one
         tries = rec.get("tries", 0) + 1
         posted[item["id"]] = {"status": "failed" if tries >= 3 else "retry", "tries": tries, "error": str(e)}
-        print(f"could not post {item['image']}: {e}")
+        print(f"could not post {item.get('image') or item.get('video')}: {e}")
 
 posted["_last_run"] = {"at": int(time.time()), "due": len(due)}
 Path("posted.json").write_text(json.dumps(posted, indent=1, ensure_ascii=False), encoding="utf-8")
